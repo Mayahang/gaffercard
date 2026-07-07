@@ -3,16 +3,49 @@ const SPORTSDB_BASE = 'https://www.thesportsdb.com/api/v1/json/123'; // shared f
 const WORLD_CUP_LEAGUE_ID = '4429'; // FIFA World Cup
 const WORLD_CUP_SEASON = '2026';
 
+// TheSportsDB fills in the score as soon as a match kicks off, not just when it
+// ends - so a bare score is NOT proof a match is over (e.g. half-time, 60th
+// minute). We only trust strStatus values that explicitly mean "the match has
+// ended" as FT. Anything explicitly in-progress is flagged LIVE, never FT.
+const FINISHED_STATUSES = new Set(['match finished', 'ft', 'aet', 'ap', 'finished', 'ft after et']);
+const IN_PROGRESS_STATUSES = new Set(['1h', '2h', 'ht', 'et', 'break', 'penalties', 'live', 'p']);
+
 const mapEvent = (event) => {
-  const isPlayed = event.intHomeScore !== null && event.intHomeScore !== undefined;
+  const rawStatus = (event.strStatus || '').trim().toLowerCase();
+  const hasScore = event.intHomeScore !== null && event.intHomeScore !== undefined;
+
+  let isFinished = false;
+  let isInProgress = false;
+
+  if (FINISHED_STATUSES.has(rawStatus)) {
+    isFinished = true;
+  } else if (IN_PROGRESS_STATUSES.has(rawStatus)) {
+    isInProgress = true;
+  } else if (!rawStatus && hasScore && event.dateEvent) {
+    // Some leagues never populate strStatus on this free API tier. As a last
+    // resort, only trust a bare score once the event's date is clearly in the
+    // past (so it can't just be a live in-progress score).
+    const daysSince = (new Date() - new Date(event.dateEvent)) / (1000 * 60 * 60 * 24);
+    isFinished = daysSince >= 1;
+  }
+
+  let status;
+  if (isFinished) {
+    status = 'FT';
+  } else if (isInProgress) {
+    status = event.strStatus ? `LIVE - ${event.strStatus}` : 'LIVE';
+  } else {
+    status = event.strTime ? `Kickoff ${event.strTime.slice(0, 5)}` : 'UPCOMING';
+  }
+
   return {
     id: event.idEvent,
     homeTeam: event.strHomeTeam,
     awayTeam: event.strAwayTeam,
     homeFlag: '⚽',
     awayFlag: '⚽',
-    status: isPlayed ? 'FT' : (event.strTime ? `Kickoff ${event.strTime.slice(0, 5)}` : 'UPCOMING'),
-    score: isPlayed ? `${event.intHomeScore} - ${event.intAwayScore}` : '0 - 0',
+    status,
+    score: hasScore ? `${event.intHomeScore} - ${event.intAwayScore}` : '0 - 0',
     competition: event.strLeague || 'FIFA World Cup',
     venue: event.strVenue || 'Stadium',
     date: event.dateEvent,
