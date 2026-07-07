@@ -29,7 +29,13 @@ setApiError(!live);
       }
     };
     loadFixtures();
-    // 🎛️ CRITICAL FIX: Leave this array empty [] so it doesn't spin up a 502 loop server crash!
+    // Refresh every 45s so match status (LIVE -> FT, halftime -> final score)
+    // updates automatically without needing a manual page reload. 45s is slow
+    // enough to avoid hammering the free API tier / triggering the earlier
+    // 502 loop issue, while still catching status changes within a reasonable
+    // window during a live match.
+    const intervalId = setInterval(loadFixtures, 45000);
+    return () => clearInterval(intervalId);
   }, []);
 
   const renderScore = (scoreString, index) => {
